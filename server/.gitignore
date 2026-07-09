@@ -1,0 +1,4 @@
+.env
+.env.*
+claudesession
+.auth_token.local

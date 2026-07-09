@@ -1,0 +1,5 @@
+// Copy to src/config.h and fill in (or run ./setup.sh, which writes it for
+// you). AUTH_TOKEN is the fly.io AUTH_TOKEN secret
+// (server/.auth_token.local), NOT an Anthropic API key.
+#define SERVER_HOST "your-app.fly.dev"
+#define AUTH_TOKEN "..."

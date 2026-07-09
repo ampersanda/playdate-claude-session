@@ -1,0 +1,10 @@
+build/
+*.pdx
+Source/pdex.dylib
+Source/pdex.elf
+Source/pdex.bin
+Source/pdex.so
+src/config.h
+*.local.sh
+*.pdx.zip
+.DS_Store

@@ -1,0 +1,7 @@
+name=Claude Session
+author=You
+description=Claude plan-usage limits on your Playdate.
+bundleID=com.example.claudesession
+version=1.1
+buildNumber=2
+imagePath=

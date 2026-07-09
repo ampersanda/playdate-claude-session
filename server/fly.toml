@@ -1,0 +1,45 @@
+# fly.io config — deploy with: fly deploy
+# app/region are filled in by ../setup.sh (or edit them by hand).
+# Secrets:
+#   fly secrets set AUTH_TOKEN=...                # gate /api/usage
+#   fly secrets set CLAUDE_CREDENTIALS='<json>'   # from: go run ./cmd/login
+
+app = "your-app-name"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_ENV = "prod"
+  # Rotated OAuth tokens persist here (volume) so restarts survive
+  # refresh-token rotation.
+  CREDENTIALS_FILE = "/data/credentials.json"
+
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 40
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/api/health"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
