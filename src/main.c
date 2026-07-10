@@ -35,8 +35,13 @@ static int stale = 0;
 static int haveData = 0;
 static int netAllowed = 0;
 static int refreshFlash = 0;
+static int limitHit = 0;         // session bar at 100%
+static float resetWait = 0;      // seconds from last fetch until the session resets
+static char limitMsg[64] = "";
+static int autoLockDirty = 0;    // set from the network callback, applied in update()
 static PDMenuItem* timerMenuItem = NULL;
 static PDMenuItem* noSleepMenuItem = NULL;
+static PDMenuItem* sleepAtFullMenuItem = NULL;
 static PDSynth* dingSynth = NULL;
 static int dingPending = 0;
 static HTTPConnection* conn = NULL;
@@ -49,11 +54,42 @@ static void startFetch(void);
 
 static void drawBar(PlaydateAPI* pd, int x, int y, int w, int h, float pct)
 {
-    int fillW = (int)(w * pct);
-    if (fillW < 1) return;
-
     pd->graphics->drawRect(x - 1, y - 1, w + 2, h + 2, kColorBlack);
-    pd->graphics->fillRect(x, y, fillW, h, kColorBlack);
+
+    int fillW = (int)(w * pct);
+    if (fillW >= 1)
+        pd->graphics->fillRect(x, y, fillW, h, kColorBlack);
+}
+
+// parseResets converts the server's pretty duration ("3d 18h", "1h 57m",
+// "57m") to seconds; returns 0 when nothing parses.
+static float parseResets(const char* s)
+{
+    float secs = 0;
+    while (*s)
+    {
+        if (*s >= '0' && *s <= '9')
+        {
+            long n = strtol(s, (char**)&s, 10);
+            if (*s == 'd') secs += n * 86400;
+            else if (*s == 'h') secs += n * 3600;
+            else if (*s == 'm') secs += n * 60;
+        }
+        else
+            s++;
+    }
+    return secs;
+}
+
+// While the session bar sits at 100% the normal cadence stops and the next
+// fetch waits for the reset itself (plus a buffer, since the server's reset
+// string has minute resolution).
+#define RESET_BUFFER 60.0f
+static float fetchInterval(void)
+{
+    if (limitHit && resetWait > 0)
+        return resetWait < 60.0f ? 60.0f : resetWait;
+    return refreshInterval;
 }
 
 // parseBody consumes the server's plain format (see backend writePlain):
@@ -79,7 +115,8 @@ static void parseBody(char* body)
         *p2 = '\0';
 
         const char* name = line;
-        if (strcmp(name, "session") == 0) name = "Current session";
+        int isSession = strcmp(name, "session") == 0;
+        if (isSession) name = "Current session";
         else if (strcmp(name, "weekly") == 0) name = "All models";
 
         Bar* b = &bars[bi];
@@ -90,11 +127,29 @@ static void parseBody(char* body)
             b->current = 0; // re-animate when the bar shrinks (new session)
         b->used = 1;
         bi++;
+
+        if (isSession)
+        {
+            limitHit = b->target >= 1.0f;
+            resetWait = 0;
+            limitMsg[0] = '\0';
+            if (limitHit)
+            {
+                resetWait = parseResets(b->resets);
+                if (resetWait > 0)
+                    resetWait += RESET_BUFFER;
+                snprintf(limitMsg, sizeof(limitMsg),
+                         "limit hit - next refresh at reset (%s)", b->resets);
+            }
+            autoLockDirty = 1;
+        }
     }
     statusMsg[0] = '\0';
     refreshFlash = 25;
     haveData = 1;
-    dingPending = 1; // played from update(); this runs on the network callback
+    // played from update(); this runs on the network callback
+    // 2 = limit hit: two-note minor fall instead of the usual ding
+    dingPending = limitHit ? 2 : 1;
 }
 
 static void requestComplete(HTTPConnection* c)
@@ -184,10 +239,32 @@ static void timerOptionCallback(void* userdata)
     timerElapsed = 0;
 }
 
+// "No Sleep" keeps the screen on, except when "Sleep at 100%" is checked and
+// the session limit is hit — then auto-lock comes back so the device can
+// sleep in low power until the reset.
+static void applyAutoLock(void)
+{
+    int noSleep = gpd->system->getMenuItemValue(noSleepMenuItem);
+#if TARGET_SIMULATOR
+    // The simulator's auto-lock just blanks the window ("shows nothing"),
+    // so sleeping at the limit is device-only.
+    gpd->system->setAutoLockDisabled(noSleep);
+#else
+    int sleepAtFull = gpd->system->getMenuItemValue(sleepAtFullMenuItem);
+    gpd->system->setAutoLockDisabled(noSleep && !(limitHit && sleepAtFull));
+#endif
+}
+
 static void noSleepCallback(void* userdata)
 {
     (void)userdata;
-    gpd->system->setAutoLockDisabled(gpd->system->getMenuItemValue(noSleepMenuItem));
+    applyAutoLock();
+}
+
+static void sleepAtFullCallback(void* userdata)
+{
+    (void)userdata;
+    applyAutoLock();
 }
 
 int eventHandler(PlaydateAPI* pd, PDSystemEvent event, uint32_t arg)
@@ -215,6 +292,8 @@ int eventHandler(PlaydateAPI* pd, PDSystemEvent event, uint32_t arg)
         pd->system->setMenuItemValue(timerMenuItem, 1); // default 5 min
 
         noSleepMenuItem = pd->system->addCheckmarkMenuItem("No Sleep", 1, noSleepCallback, NULL);
+        // "%" gets eaten by the system menu renderer, so no "100%" in the title
+        sleepAtFullMenuItem = pd->system->addCheckmarkMenuItem("Sleep on limit", 1, sleepAtFullCallback, NULL);
         pd->system->setAutoLockDisabled(1);
 
         pd->system->resetElapsedTime();
@@ -253,13 +332,27 @@ static int update(void* userdata)
         // kAccessAsk: accessCallback fires after the user answers the dialog
     }
 
-    if (timerElapsed >= refreshInterval || (retryIn > 0 && timerElapsed >= retryIn))
+    if (timerElapsed >= fetchInterval() || (retryIn > 0 && timerElapsed >= retryIn))
         startFetch();
+
+    if (autoLockDirty)
+    {
+        autoLockDirty = 0;
+        applyAutoLock();
+    }
 
     if (dingPending)
     {
+        if (dingPending == 2)
+        {
+            // limit hit: descending minor third (F#5 -> D#5), "no more" cue
+            uint32_t at = pd->sound->getCurrentTime();
+            pd->sound->synth->playNote(dingSynth, 739.99f, 0.6f, 0.2f, at);
+            pd->sound->synth->playNote(dingSynth, 622.25f, 0.6f, 0.35f, at + 11025);
+        }
+        else
+            pd->sound->synth->playNote(dingSynth, 880.0f, 0.6f, 0.2f, 0);
         dingPending = 0;
-        pd->sound->synth->playNote(dingSynth, 880.0f, 0.6f, 0.2f, 0);
     }
 
     // Hold A for 3 seconds to force a refresh.
@@ -333,10 +426,13 @@ static int update(void* userdata)
         drawBar(pd, BAR_X, by, BAR_W, BAR_H + 2, b->current);
     }
 
-    if (statusMsg[0] != '\0')
+    const char* info = statusMsg[0] != '\0' ? statusMsg
+                     : (limitHit && limitMsg[0] != '\0') ? limitMsg
+                     : NULL;
+    if (info != NULL)
     {
-        int mw = pd->graphics->getTextWidth(font, statusMsg, strlen(statusMsg), kASCIIEncoding, 0);
-        pd->graphics->drawText(statusMsg, strlen(statusMsg), kASCIIEncoding, (LCD_COLUMNS - mw) / 2, 60);
+        int mw = pd->graphics->getTextWidth(font, info, strlen(info), kASCIIEncoding, 0);
+        pd->graphics->drawText(info, strlen(info), kASCIIEncoding, (LCD_COLUMNS - mw) / 2, 60);
     }
     else if (conn != NULL || refreshFlash > 0)
     {
@@ -349,9 +445,10 @@ static int update(void* userdata)
 
     if (haveData)
     {
-        float remain = refreshInterval - timerElapsed;
+        float interval = fetchInterval();
+        float remain = interval - timerElapsed;
         if (remain < 0) remain = 0;
-        int cw = (int)(LCD_COLUMNS * (remain / refreshInterval));
+        int cw = (int)(LCD_COLUMNS * (remain / interval));
         if (cw > 0)
             pd->graphics->fillRect(0, LCD_ROWS - COUNTDOWN_H, cw, COUNTDOWN_H, kColorBlack);
     }
