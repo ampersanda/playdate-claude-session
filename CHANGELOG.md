@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6 (2026-07-14)
+
+- Launcher card banner (350×155, `Source/SystemAssets/card.png`): Claude spark
+  logo + app name, generated from SVG and thresholded to 1-bit
+
 ## 1.5 (2026-07-14)
 
 - Force-refresh hold (A button) shortened from 3 s to 1.5 s
