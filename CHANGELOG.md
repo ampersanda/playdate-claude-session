@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5 (2026-07-14)
+
+- Force-refresh hold (A button) shortened from 3 s to 1.5 s
+
 ## 1.4 (2026-07-11)
 
 - When a refresh lands with the session limit at 100%, play a two-note

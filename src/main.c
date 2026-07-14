@@ -47,7 +47,7 @@ static int dingPending = 0;
 static HTTPConnection* conn = NULL;
 static float retryIn = 0; // when >0, retry a failed fetch after this many seconds
 
-#define FORCE_HOLD_MS 3000
+#define FORCE_HOLD_MS 1500
 static unsigned int aHeldSince = 0; // ms timestamp when A went down, 0 = not held
 
 static void startFetch(void);
@@ -355,7 +355,7 @@ static int update(void* userdata)
         dingPending = 0;
     }
 
-    // Hold A for 3 seconds to force a refresh.
+    // Hold A for 1.5 seconds to force a refresh.
     float holdPct = 0;
     PDButtons held;
     pd->system->getButtonState(&held, NULL, NULL);
