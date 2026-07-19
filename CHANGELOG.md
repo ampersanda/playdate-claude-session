@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7 (2026-07-19)
+
+- Status/info messages ("limit hit …", errors) moved to the bottom center,
+  above the countdown bar, so they no longer overlap the first bar's label;
+  before any data arrives ("loading...") the message stays centered on the
+  empty screen
+
 ## 1.6 (2026-07-14)
 
 - Launcher card banner (350×155, `Source/SystemAssets/card.png`): Claude spark

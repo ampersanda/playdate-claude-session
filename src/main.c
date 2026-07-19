@@ -431,8 +431,12 @@ static int update(void* userdata)
                      : NULL;
     if (info != NULL)
     {
+        // with bars on screen, sit at the bottom clear of labels and the
+        // countdown strip; before any data, center on the empty screen
         int mw = pd->graphics->getTextWidth(font, info, strlen(info), kASCIIEncoding, 0);
-        pd->graphics->drawText(info, strlen(info), kASCIIEncoding, (LCD_COLUMNS - mw) / 2, 60);
+        int my = haveData ? LCD_ROWS - COUNTDOWN_H - textH - 4
+                          : (LCD_ROWS - textH) / 2;
+        pd->graphics->drawText(info, strlen(info), kASCIIEncoding, (LCD_COLUMNS - mw) / 2, my);
     }
     else if (conn != NULL || refreshFlash > 0)
     {
